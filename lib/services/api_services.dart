@@ -99,162 +99,72 @@ class ApiProvider{
 // Assuming ApiProvider class structure
 // ...
 
-  Stream<double> uploadFile({
+  Future<String> uploadFile({
     required String filePath,
     required String fileName,
     required int startByte,
+    required Function(int count, int total)? onSendProgress, // 🎯 NEW: Dio's progress callback
     CancelToken? cancelToken,
-  }) {
-    // 1. Initialize the StreamController synchronously.
-    final controller = StreamController<double>();
+  }) async { // 🎯 Function is now declared 'async'
 
-    // 2. Immediately Invoke an Anonymous Asynchronous Function (IIAF).
-    // This starts the complex logic on the event loop, allowing the function
-    // to return the stream instantly (Step 3).
-    (() async {
-      // --- All Asynchronous Logic is inside this block ---
-
-      try {
-        if (_accessToken == null) {
-          await getToken();
-        }
-
-        const String jsonPatchPayload = '[{"op":"replace","path":"/updateBy","value":123}]';
-
-        final file = File(filePath);
-        if (!await file.exists()) {
-          // Throwing here will be caught by the outer catch block
-          throw Exception('File not found at path: $filePath');
-        }
-        final options = Options(
-          headers: {
-            // NOTE: Header name depends on your backend (e.g., 'Content-Range', 'X-Upload-Offset')
-            'X-Upload-Offset': startByte.toString(),
-          },
-        );
-
-        final formData = FormData.fromMap({
-          // Ensure file existence before calling MultipartFile.fromFile
-          'file': await MultipartFile.fromFile(filePath, filename: fileName),
-          'jsonPatch': jsonPatchPayload,
-        });
-        final int absoluteTotalBytes = await file.length();
-        // Execute the Dio request
-        await _dio.patch(
-          updateAppUrl,
-          data: formData,
-          options: options,
-          onSendProgress: (count, total) {
-            if (total != -1) {
-              double totalBytesSent = (count + startByte).toDouble();
-              double progress = totalBytesSent / absoluteTotalBytes;
-              print('progress is $progress');
-              // Safely add progress to the stream
-              if (!controller.isClosed) {
-                controller.add(progress);
-              }
-            }
-          },
-        );
-
-        // On successful completion
-        controller.add(1.0);
-        print('APIProvider: File upload PATCH complete.');
-
-      } on DioException catch (e) {
-        // Catch network-specific errors and propagate them through the stream
-        if (!controller.isClosed) {
-          controller.addError(e);
-        }
-        rethrow;
-      } catch (e) {
-        // Catch file-specific errors (like "File not found")
-        if (!controller.isClosed) {
-          controller.addError(e);
-        }
-        rethrow;
-      } finally {
-        // Ensure the stream is closed, regardless of success or failure.
-        if (!controller.isClosed) {
-          await controller.close();
-        }
-      }
-
-      // --- End of Asynchronous Logic ---
-    })(); // <-- The final '()' immediately executes the async function.
-
-    // 3. Return the stream synchronously before the upload even begins.
-    return controller.stream;
-  }
-
- /* Stream<double> uploadFile({
-    required String filePath,
-    required String fileName,
-  }) { // <-- NO async* here!
-
-    // The rest of the logic remains the same, using a controller to feed the stream
-    // but the function returns the stream immediately.
-
-    // 1. Initialize the StreamController
-    final controller = StreamController<double>();
-
-    // 2. Wrap the asynchronous work in a future (or just execute it)
-    // This allows the function to return the stream instantly while the upload runs asynchronously.
-    Future<void> runUpload() async {
-      // 3. Keep the token logic, but it needs to be inside the async block
-      if (_accessToken == null) {
-        await getToken();
-      }
-
-      const String jsonPatchPayload = '[{"op":"replace","path":"/updateBy","value":123}]';
-
-      final file = File(filePath);
-      if (!await file.exists()) {
-        throw Exception('File not found at path: $filePath');
-      }
-
-      final formData = FormData.fromMap({
-        'file': await MultipartFile.fromFile(filePath, filename: fileName),
-        'jsonPatch': jsonPatchPayload,
-      });
-
-      try {
-        await _dio.patch(
-          updateAppUrl,
-          data: formData,
-          onSendProgress: (count, total) {
-            if (total != -1) {
-              double progress = count / total;
-              print('progress is $progress');
-              if (!controller.isClosed) {
-                controller.add(progress); // Emit real-time progress
-              }
-            }
-          },
-        );
-
-        // 4. On successful completion
-        controller.add(1.0);
-        print('APIProvider: File upload PATCH complete.');
-      } on DioException catch (e) {
-        // 5. On error
-        if (!controller.isClosed) {
-          controller.addError(e);
-        }
-        // Re-throw the error to be caught by the service layer's listener
-        rethrow;
-      } finally {
-        // 6. Close the stream, ensuring the onDone callback fires on the listener
-        await controller.close();
-      }
+    if (_accessToken == null) {
+      await getToken();
     }
 
-    // 7. Execute the upload logic immediately
-    runUpload();
+    const String jsonPatchPayload = '[{"op":"replace","path":"/updateBy","value":123}]';
 
-    // 8. CRITICAL: Return the stream immediately before the upload is finished.
-    return controller.stream;
-  }*/
+    final file = File(filePath);
+    if (!await file.exists()) {
+      throw Exception('File not found at path: $filePath');
+    }
+    // Note: absoluteTotalBytes is not strictly needed here since we use startByte in the Service layer,
+    // but useful for local checks.
+    // final int absoluteTotalBytes = await file.length();
+
+    final options = Options(
+      headers: {
+        'X-Upload-Offset': startByte.toString(),
+      },
+    );
+
+    final formData = FormData.fromMap({
+      'file': await MultipartFile.fromFile(filePath, filename: fileName),
+      'jsonPatch': jsonPatchPayload,
+    });
+
+    try {
+      // 2. Execute the Dio request and await the final Response
+      final Response response = await _dio.patch(
+        updateAppUrl,
+        data: formData,
+        options: options,
+        onSendProgress: onSendProgress, // 🎯 Pass the callback directly to Dio
+        cancelToken: cancelToken,
+      );
+
+      // 3. Handle the server response and retrieve the URL
+      if (response.statusCode == 200 || response.statusCode == 201) {
+
+        // Use print() to see the response data as requested:
+        print('APIProvider: Dio Response Data Received: ${response.data}');
+
+        // --- MOCK LOGIC START ---
+        // In a real app, you would parse: return response.data['download_url'] as String;
+        final mockDownloadUrl = response.data;
+
+        return mockDownloadUrl; // 🎯 Return the Download URL, fulfilling the Future<String>
+        // --- MOCK LOGIC END ---
+      } else {
+        throw Exception('Upload failed with status: ${response.statusCode}');
+      }
+    } on DioException {
+      rethrow;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+
   Future<Response> downloadFile({
     required String fileUrl,
     required String savePath,

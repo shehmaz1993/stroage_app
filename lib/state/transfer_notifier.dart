@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 
 import '../models/transfer_model.dart';
 import '../services/transfer_service.dart';
@@ -8,11 +9,12 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
   TransferNotifier(this._service) : super([]);
 
-  // --- START TRANSFER ---
 
-  void startNewUpload(String filePath, String fileName, String fileSize) {
+
+  void startNewUpload(String filePath, String fileName, String fileSize) async {
     final id = DateTime.now().millisecondsSinceEpoch.toString();
     final int totalBytes = _parseSizeStringToBytes(fileSize);
+
     final newTransfer = FileTransfer(
       id: id,
       name: fileName,
@@ -24,114 +26,156 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
       fileUrl: null,
     );
 
-    // 1. Add to state
     state = [...state, newTransfer];
 
-    // 2. Start the service operation
-    final progressStream = _service.startUpload(filePath, fileName, id, startByte: 0);
+    try {
+      final String downloadUrl = await _service.startUpload(
+        filePath: filePath,
+        fileName: fileName,
+        taskId: id,
+        startByte: 0,
+        onProgressUpdate: (progress) {
+          updateProgress(id, progress);
+        },
+      );
 
-    // 3. Listen to the stream and update the state
-    final subscription = progressStream.listen(
-          (progress) => updateProgress(id, progress),
-      onDone: () => markAsComplete(id),
-      onError: (error) => markAsFailed(id),
-    );
+      print('Notifier: Upload completed! Download URL retrieved: $downloadUrl');
 
-    // 4. Update the transfer object with its subscription (for pause/resume)
-    state = state.map((t) => t.id == id ? t.copyWith(subscription: subscription) : t).toList();
+      await _service.saveDownloadableFileMetadata(
+        fileId: id,
+        fileName: fileName,
+        fileUrl: downloadUrl,
+        size: fileSize,
+      );
+
+      markAsComplete(id);
+
+    } catch (error) {
+      markAsFailed(id);
+      print('Notifier: Upload failed or was cancelled: $error');
+    }
   }
+
+
 
   void startNewDownload(String fileUrl, String fileName, String fileSize, String savePath) {
     final id = DateTime.now().millisecondsSinceEpoch.toString();
     final int totalBytes = _parseSizeStringToBytes(fileSize);
+
+
 
     final newTransfer = FileTransfer(
       id: id,
       name: fileName,
       size: fileSize,
       isUpload: false,
-      status: TransferStatus.pending,
+      status: TransferStatus.downloading,
       totalBytes: totalBytes,
       filePath: savePath,
-      fileUrl: fileUrl,  
+      fileUrl: fileUrl, // Already set here
     );
 
     state = [...state, newTransfer];
 
-    final progressStream = _service.startDownload(fileUrl, savePath, fileName, id,startByte: 0);
+    // 1. Start the service operation (returns a Stream<double>)
+    final progressStream = _service.startDownload(
+        fileUrl,
+        savePath,
+        fileName,
+        id,
+        startByte: 0
+    );
 
+    // 2. Listen to the stream and update the state
     final subscription = progressStream.listen(
           (progress) => updateProgress(id, progress),
       onDone: () => markAsComplete(id),
       onError: (error) => markAsFailed(id),
     );
 
+    // 3. Update the transfer object with its subscription (for pause/resume)
     state = state.map((t) => t.id == id ? t.copyWith(subscription: subscription) : t).toList();
   }
 
-  // --- CONTROL ACTIONS ---
+
 
   void pauseTransfer(String id) {
-    final transfer = state.firstWhere((t) => t.id == id && t.status.isActive);
 
-    if (transfer.subscription != null) {
+    final transfer = state.where((t) => t.id == id && t.status.isActive).firstOrNull;
 
-      // 1. CRITICAL: Cancel the underlying network request via the service.
-      _service.cancelTransfer(id);
+    if (transfer == null) return; // Exit if transfer is not found or not active
 
-      // 2. Cancel the stream listener, ensuring no further data is processed.
+    // Cancel the underlying network request via the service
+    _service.cancelTransfer(id);
+
+    if (transfer.isUpload) {
+      // For uploads, we rely on the service to stop the Dio process and save progress
+      _service.saveProgressBytes(id, _getCurrentBytes(transfer));
+    } else if (transfer.subscription != null) {
+      // For downloads, cancel the listener
       transfer.subscription!.cancel();
-
-      // 3. Update the state to paused, setting subscription to null.
-      state = state.map((t) => t.id == id ? t.copyWith(status: TransferStatus.paused, subscription: null) : t).toList();
     }
+
+    // Update the state to paused
+    state = state.map((t) => t.id == id ? t.copyWith(status: TransferStatus.paused, subscription: null) : t).toList();
   }
 
   void resumeTransfer(String id) async {
+    // Safe lookup is guaranteed since resume is only called on paused transfers
     final transfer = state.firstWhere((t) => t.id == id && t.status == TransferStatus.paused);
 
-    // 1. Get the last known progress bytes from persistence.
-    final lastSavedBytes = await _service.getSavedBytes(id);
+    final lastSavedBytes = await _service.getSavedBytes(id) ?? 0;
 
-    // 2. Determine transfer parameters using the saved data.
+    if (lastSavedBytes >= transfer.totalBytes) {
+      markAsComplete(id);
+      return;
+    }
+
     final String source = transfer.isUpload ? transfer.filePath : transfer.fileUrl!;
     final String fileName = transfer.name;
 
-    // 3. Update the status in the UI immediately.
     final newStatus = transfer.isUpload ? TransferStatus.uploading : TransferStatus.downloading;
     state = state.map((t) => t.id == id ? t.copyWith(status: newStatus) : t).toList();
 
-    // 4. Start a NEW resumable transfer from lastSavedBytes.
-    final Stream<double> progressStream;
     if (transfer.isUpload) {
-      progressStream = _service.startUpload(
-          source, // filePath
-          fileName,
-          id,
-          startByte: lastSavedBytes! // Resume point
-      );
+      // --- UPLOAD RESUME (Future/Callback) ---
+      try {
+        final String downloadUrl = await _service.startUpload(
+          filePath: source,
+          fileName: fileName,
+          taskId: id,
+          startByte: lastSavedBytes,
+          onProgressUpdate: (progress) => updateProgress(id, progress),
+        );
+
+        await _service.saveDownloadableFileMetadata(
+            fileId: id, fileName: fileName, fileUrl: downloadUrl, size: transfer.size);
+        markAsComplete(id);
+      } catch (error) {
+        markAsFailed(id);
+      }
+
     } else {
-      progressStream = _service.startDownload(
-          source, // fileUrl
-          transfer.filePath, // savePath
+      // --- DOWNLOAD RESUME (Stream/Subscription) ---
+      final progressStream = _service.startDownload(
+          source,
+          transfer.filePath,
           fileName,
           id,
-          startByte: lastSavedBytes! // Resume point
+          startByte: lastSavedBytes
       );
+
+      final subscription = progressStream.listen(
+            (progress) => updateProgress(id, progress),
+        onDone: () => markAsComplete(id),
+        onError: (error) => markAsFailed(id),
+      );
+
+      state = state.map((t) => t.id == id ? t.copyWith(subscription: subscription) : t).toList();
     }
-
-    // 5. Set up the NEW listener.
-    final subscription = progressStream.listen(
-          (progress) => updateProgress(id, progress),
-      onDone: () => markAsComplete(id),
-      onError: (error) => markAsFailed(id),
-    );
-
-    // 6. Update the transfer object with the NEW subscription.
-    state = state.map((t) => t.id == id ? t.copyWith(subscription: subscription) : t).toList();
   }
 
-  // --- STATE UPDATES ---
+
 
   void updateProgress(String id, double progress) {
     print('Notifier: Updating progress for $id: ${progress.toStringAsFixed(4)}');
@@ -139,13 +183,13 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
       if (t.id == id) {
         TransferStatus newStatus = t.status;
 
-        // 1. THE RESUMABILITY HOOK: Save the current byte count (uses the stored t.totalBytes)
         if (t.totalBytes > 0) {
-          final int currentBytes = (progress * t.totalBytes).toInt();
+          final int currentBytes = _calculateCurrentBytes(t.totalBytes, progress);
+
           _service.saveProgressBytes(id, currentBytes);
         }
 
-        // 2. Handle status transition (Pending -> Active)
+        // Status transition logic
         if (t.status == TransferStatus.pending && progress > 0) {
           newStatus = t.isUpload ? TransferStatus.uploading : TransferStatus.downloading;
         }
@@ -162,13 +206,10 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
   void markAsComplete(String id) {
     final transfer = state.firstWhere((t) => t.id == id);
 
-    // 1. Cancel the subscription as the job is done
     transfer.subscription?.cancel();
 
-    // 2. Cleanup persistence data
     _service.cleanupTransferMetadata(id);
 
-    // 3. Notify user (WorkManager usually handles background notification, but we trigger the completion notification here too for in-app completion)
     _service.showCompletionNotification(
       taskId: id,
       fileName: transfer.name,
@@ -176,7 +217,6 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
       isSuccess: true,
     );
 
-    // 4. Update state
     state = state.map((t) => t.id == id ? t.copyWith(status: TransferStatus.complete, progress: 1.0, subscription: null) : t).toList();
   }
 
@@ -195,6 +235,14 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
     state = state.map((t) => t.id == id ? t.copyWith(status: TransferStatus.failed, subscription: null) : t).toList();
   }
 
+  int _calculateCurrentBytes(int totalBytes, double progress) {
+    return (progress * totalBytes).toInt().clamp(0, totalBytes);
+  }
+
+  int _getCurrentBytes(FileTransfer transfer) {
+    return _calculateCurrentBytes(transfer.totalBytes, transfer.progress);
+  }
+
   int _parseSizeStringToBytes(String size) {
     final sizeParts = size.split(' ');
     final double sizeValue = double.tryParse(sizeParts[0]) ?? 0.0;
@@ -202,11 +250,11 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
     int totalBytes = 0;
     if (unit.startsWith('M')) {
-      totalBytes = (sizeValue * 1024 * 1024).toInt(); // Megabytes to Bytes
+      totalBytes = (sizeValue * 1024 * 1024).toInt();
     } else if (unit.startsWith('K')) {
-      totalBytes = (sizeValue * 1024).toInt(); // Kilobytes to Bytes
+      totalBytes = (sizeValue * 1024).toInt();
     } else if (unit.startsWith('G')) {
-      totalBytes = (sizeValue * 1024 * 1024 * 1024).toInt(); // Gigabytes to Bytes
+      totalBytes = (sizeValue * 1024 * 1024 * 1024).toInt();
     }
     return totalBytes;
   }
