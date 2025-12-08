@@ -7,9 +7,6 @@ import 'package:storage_app/utils/transfer_status_extension.dart';
 import '../models/transfer_model.dart';
 import '../providers/transfer_providers.dart';
 import '../state/transfer_notifier.dart';
-// import '../models/transfer_model.dart';
-// import '../providers/transfer_provider.dart'; // Assuming this defines transferNotifierProvider
-// import '../extensions/transfer_status_ui_extensions.dart'; // For .color, .canControl, .isActive
 
 class TransferTileWidget extends ConsumerWidget { // ⬅️ ConsumerWidget for Riverpod access
   final FileTransfer transfer;

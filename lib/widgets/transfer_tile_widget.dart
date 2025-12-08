@@ -4,7 +4,7 @@ import '../models/transfer_model.dart';
 import '../state/transfer_notifier.dart';
 
 
-class TransferTileWidget extends StatelessWidget {
+/*class TransferTileWidget extends StatelessWidget {
   final FileTransfer transfer;
   final TransferNotifier notifier;
   final bool isActionable; // Determines if Pause/Resume buttons should appear
@@ -113,4 +113,4 @@ class TransferTileWidget extends StatelessWidget {
         return Colors.red;
     }
   }
-}
+}*/

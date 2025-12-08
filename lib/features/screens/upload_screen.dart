@@ -11,6 +11,7 @@ import '../../providers/transfer_providers.dart';
 import '../../state/transfer_notifier.dart';
 import '../../widgets/select_file_button.dart';
 import '../../widgets/transfer_tile_widget.dart';
+import '../../widgets/transfer_widget.dart';
 
 
 
@@ -139,7 +140,7 @@ class UploadScreen extends ConsumerWidget {
                       const Divider(),
                       ...activeUploads.map((transfer) => TransferTileWidget(
                         transfer: transfer,
-                        notifier: notifier,
+                       // notifier: notifier,
                         isActionable: true,
                       )),
                     ],

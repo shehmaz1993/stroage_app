@@ -234,6 +234,26 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
     state = state.map((t) => t.id == id ? t.copyWith(status: TransferStatus.failed, subscription: null) : t).toList();
   }
+  Future<List<Map<String, String>>> fetchDownloadableFiles() async {
+    // Simulate a quick fetch/lookup time
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    // 1. Filter the current list of transfers in the state.
+    // We look for files that are complete AND were initiated as uploads (isUpload: true).
+    final downloadableTransfers = state.where((t) =>
+    t.status == TransferStatus.complete && t.isUpload
+    ).toList();
+
+    // 2. Map the filtered FileTransfer objects to the necessary metadata format.
+    return downloadableTransfers.map((t) => {
+      'fileName': t.name,
+      // The FileUrl is the key piece of information needed to start a new download request
+      'fileUrl': t.fileUrl!,
+      'size': t.size,
+      // totalBytes is optional here but useful if needed for new download status tracking
+      'totalBytes': t.totalBytes.toString(),
+    }).toList();
+  }
 
   int _calculateCurrentBytes(int totalBytes, double progress) {
     return (progress * totalBytes).toInt().clamp(0, totalBytes);

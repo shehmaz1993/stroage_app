@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:storage_app/models/transfer_model.dart';
+import 'package:storage_app/widgets/transfer_tile_widget.dart';
+import 'package:storage_app/widgets/transfer_widget.dart';
 
 import '../providers/transfer_providers.dart';
 // import '../providers/transfer_provider.dart';
@@ -43,7 +45,7 @@ class GlobalTransferStatus extends ConsumerWidget {
                   transfer: t,
                   isActionable: false, // ⬅️ No actions in the summary banner
                 );
-              }).toList(),
+              }),
 
               if (activeTransfers.length > 2)
                 const Padding(

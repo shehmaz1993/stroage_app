@@ -4,6 +4,8 @@ import 'package:storage_app/features/screens/upload_screen.dart';
 import 'package:storage_app/services/background_manager.dart';
 import 'package:storage_app/utils/apps_global.dart';
 
+import 'features/screens/dashboard_screen.dart';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   initializeWorkManager();
@@ -21,7 +23,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Flutter Demo',
       navigatorKey: navigatorKey,
-      home: UploadScreen(),
+      home: const DashboardScreen(),
     );
   }
 }

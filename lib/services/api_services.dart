@@ -150,7 +150,8 @@ class ApiProvider{
 
         // --- MOCK LOGIC START ---
         // In a real app, you would parse: return response.data['download_url'] as String;
-        final mockDownloadUrl = response.data;
+
+        final mockDownloadUrl = response.data.toString();
 
         return mockDownloadUrl; // 🎯 Return the Download URL, fulfilling the Future<String>
         // --- MOCK LOGIC END ---
