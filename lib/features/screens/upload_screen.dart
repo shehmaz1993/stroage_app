@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:storage_app/models/transfer_model.dart';
 import 'dart:math';
 
+import '../../models/file_selection_result_model.dart';
 import '../../providers/transfer_providers.dart';
 import '../../state/transfer_notifier.dart';
 import '../../widgets/select_file_button.dart';
@@ -23,28 +27,57 @@ class UploadScreen extends ConsumerWidget {
 
   // --- File Selection and Initiation Orchestration ---
   void _startFileSelection(BuildContext context, WidgetRef ref, TransferNotifier notifier) async {
-    // 1. Read the dedicated FileSelectionService
-    final fileSelector = ref.read(fileSelectionServiceProvider);
+    // 1. Get the actual file selector service
+    final fileSelector = ref.read(fileSelectionServiceProvider); // Assuming this provider exists
+    final result = await fileSelector.pickFile(); // Call the actual service
 
-    // 2. Call the service to open the picker and get results
-    final result = await fileSelector.pickFile();
+    // --- REMOVE THE TEMPORARY MOCK BLOCK COMPLETELY ---
+    /*
+    final result = FileSelectionResult(
+      filePath: '/path/to/my/video.mp4',
+      fileName: 'AwesomeVideo.mp4',
+      byteSize: 150 * 1024 * 1024, // Mock 150 MB file
+    );
+    */
 
     if (result != null) {
-      // 3. Prepare data for the Notifier
-      final String humanReadableSize = _formatBytes(result.byteSize);
+      // **CRITICAL FIX: Copy the file to a permanent location**
+      try {
+        final originalPath = result.filePath;
+        final originalFile = File(originalPath);
 
-      // 4. Initiate the upload using the Notifier
-      // The Notifier now receives the clean, raw data it needs to start the process.
-      notifier.startNewUpload(
-        result.filePath,
-        result.fileName,
-        humanReadableSize,
-      );
+        // Use a permanent, app-accessible directory
+        final appDocDir = await getApplicationDocumentsDirectory();
 
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Preparing upload for: ${result.fileName}')),
+        // Create a unique file name to avoid collisions
+        final uniqueFileName = '${DateTime.now().millisecondsSinceEpoch}_${result.fileName}';
+        final permanentPath = '${appDocDir.path}/$uniqueFileName';
+
+        // Copy the file. This reads from the picker's URI/cache and writes to a stable location.
+        final permanentFile = await originalFile.copy(permanentPath);
+
+        final String humanReadableSize = _formatBytes(result.byteSize);
+
+        // Initiate upload using the permanent path
+        notifier.startNewUpload(
+          permanentFile.path, // <-- Pass the permanent path
+          result.fileName,
+          humanReadableSize,
         );
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Preparing upload for: ${result.fileName}')),
+          );
+        }
+      } catch (e) {
+        // Handle errors during file copy (e.g., permission issues, file read failure)
+        print('Error during file preparation/copy: $e');
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to prepare file for upload: $e')),
+          );
+        }
       }
     }
   }
@@ -116,11 +149,11 @@ class UploadScreen extends ConsumerWidget {
           ),
 
           // 2. Persistent Bottom Button Area (Reusable Widget)
-          SelectFileButton(
+        /*  SelectFileButton(
             text: 'Select File to Upload',
             icon: Icons.upload_file,
             onPressed: () => _startFileSelection(context, ref, notifier), // Pass ref here
-          ),
+          ),*/
         ],
       ),
     );

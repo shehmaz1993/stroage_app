@@ -14,6 +14,8 @@ class FileTransfer {
   double progress;
   TransferStatus status;
   final bool isUpload;
+  final String filePath;
+  final String? fileUrl;
 
   StreamSubscription<double>? subscription;
 
@@ -25,7 +27,10 @@ class FileTransfer {
     this.progress = 0.0,
     this.status = TransferStatus.pending,
     required this.isUpload,
+    required this.filePath,
+    this.fileUrl,
     this.subscription,
+
   });
 
   // Method used by the StateNotifier to update the object immutably
@@ -33,6 +38,8 @@ class FileTransfer {
     double? progress,
     TransferStatus? status,
     StreamSubscription<double>? subscription,
+    String? filePath,
+    String? fileUrl,
   }) {
     return FileTransfer(
       id: id,
@@ -42,6 +49,8 @@ class FileTransfer {
       progress: progress ?? this.progress,
       status: status ?? this.status,
       isUpload: isUpload,
+      filePath: filePath ?? this.filePath,
+      fileUrl: fileUrl ?? this.fileUrl,
       subscription: subscription ?? this.subscription,
     );
   }

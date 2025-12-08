@@ -11,6 +11,8 @@ class TransferService {
   final ApiProvider _apiProvider;
   final NotificationService _notificationService;
   final TransferPersistenceService _persistenceService;
+  // 🎯 NEW: Map to store Dio CancelToken instances by taskId for cancellation
+  final Map<String, CancelToken> _cancelTokens = {};
 
   // Constructor receives all dependencies via Riverpod
   TransferService(
@@ -21,47 +23,91 @@ class TransferService {
 
   // --- Core Upload Logic ---
 
-  /// Initiates the file upload process.
-  Stream<double> startUpload(String filePath, String fileName, String taskId) {
-    // 1. Hook for background persistence (Saves necessary data)
+  /// Initiates the file upload process, starting from a specific byte offset.
+  Stream<double> startUpload(
+      String filePath,
+      String fileName,
+      String taskId,
+      {required int startByte} // 🎯 NEW: Added startByte
+      ) {
     _registerBackgroundAndPersistData(taskId, true, filePath, fileName: fileName);
 
-    // 2. Delegate the actual network task to the ApiProvider
+    // 🎯 NEW: Create a new CancelToken and map it to the taskId
+    final cancelToken = CancelToken();
+    _cancelTokens[taskId] = cancelToken;
+
+    // The stream logic is now simpler, as the ApiProvider handles the stream controller setup.
+    // We rely on ApiProvider to handle the startByte logic for the resumable upload.
     return _apiProvider.uploadFile(
       filePath: filePath,
       fileName: fileName,
+      startByte: startByte, // 🎯 Pass the resume point
+      cancelToken: cancelToken, // 🎯 Pass the token for cancellation
     );
   }
 
   // --- Core Download Logic ---
 
-  /// Initiates the file download process.
-  Stream<double> startDownload(String fileUrl, String savePath, String fileName, String taskId) async* {
+  /// Initiates the file download process, starting from a specific byte offset.
+  Stream<double> startDownload(
+      String fileUrl,
+      String savePath,
+      String fileName,
+      String taskId,
+      {required int startByte} // 🎯 NEW: Added startByte
+      ) async* {
     // 1. Hook for background persistence (Saves necessary data)
     _registerBackgroundAndPersistData(taskId, false, savePath, fileName: fileName, fileUrl: fileUrl);
 
+    // 🎯 NEW: Create a new CancelToken and map it to the taskId
+    final cancelToken = CancelToken();
+    _cancelTokens[taskId] = cancelToken;
+
     final controller = StreamController<double>();
-    final lastProgressBytes = await _persistenceService.getLastSavedByteCount(taskId);
-    final startByte = lastProgressBytes ?? 0;
+
+    // We use the startByte passed in the function signature for resumption logic
+    // The ApiProvider will use this value to set the Range header.
 
     try {
       // 2. Delegate the network task to the ApiProvider
       await _apiProvider.downloadFile(
         fileUrl: fileUrl,
         savePath: savePath,
+        // The ApiProvider should handle the actual progress calculation (count / total)
+        // to simplify the service layer.
         onReceiveProgress: (count, total) {
           if (total != -1) {
+            // Note: This needs to be carefully implemented in ApiProvider
+            // to account for the startByte offset.
             controller.add(count / total);
           }
-        }, fileId: '',startByte: startByte,
+        },
+        fileId: '',
+        startByte: startByte, // 🎯 Pass the resume point
+        cancelToken: cancelToken, // 🎯 Pass the token for cancellation
       );
       controller.add(1.0);
     } on DioException catch (e) {
       controller.addError(e);
     } finally {
       await controller.close();
+      _cancelTokens.remove(taskId); // Clean up token regardless of outcome
     }
     yield* controller.stream;
+  }
+
+  // 🎯 NEW: Method to cancel the running Dio request
+  void cancelTransfer(String id) {
+    final token = _cancelTokens[id];
+    if (token != null && !token.isCancelled) {
+      token.cancel('Transfer paused/cancelled by user or app.');
+      _cancelTokens.remove(id);
+    }
+  }
+
+  // 🎯 NEW: Expose method to retrieve saved bytes from persistence
+  Future<int?> getSavedBytes(String id) {
+    return _persistenceService.getLastSavedByteCount(id);
   }
 
   Future<void> cleanupTransferMetadata(String id) {

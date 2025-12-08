@@ -46,9 +46,9 @@ void callbackDispatcher() {
     final notificationService = NotificationService();
 
     // Initialize notifications within the isolated environment
-    await notificationService.initializeNotifications();
+    await notificationService.initializeNotifications(); // CORRECT: Initialization is present
 
-    final transferService = TransferService(apiProvider, notificationService, persistenceService); // All services linked
+    final transferService = TransferService(apiProvider, notificationService, persistenceService);
 
     final fileId = inputData?['file_id'] as String?;
     if (fileId == null) return Future.value(true);
@@ -57,7 +57,7 @@ void callbackDispatcher() {
     final metadata = await persistenceService.getTransferMetadata(fileId);
     if (metadata == null) {
       print('WorkManager: Metadata not found for $fileId. Skipping task.');
-      return Future.value(true); // Treat as done if metadata is missing
+      return Future.value(true);
     }
 
     final filePath = metadata['filePath'] as String;
@@ -65,16 +65,30 @@ void callbackDispatcher() {
     final fileName = metadata['fileName'] as String;
     final isUpload = metadata['isUpload'] as bool;
 
+    final int startByte = await persistenceService.getLastSavedByteCount(fileId) ?? 0;
+    print('WorkManager: Starting task $fileId from byte offset: $startByte');
+
     // --- Core Execution Logic ---
     try {
       final progressStream = isUpload
-          ? transferService.startUpload(filePath, fileName, fileId) // Upload path is source
-          : transferService.startDownload(fileUrl!, filePath, fileId,taskId); // Download path is destination
+          ? transferService.startUpload(
+          filePath,
+          fileName,
+          fileId,
+          startByte: startByte
+      )
+          : transferService.startDownload(
+          fileUrl!,
+          filePath,
+          fileName,
+          fileId,
+          startByte: startByte
+      );
 
       await for (double progress in progressStream) {
         // 3. Update the persistent notification with real-time progress
         notificationService.notificationsPlugin.show(
-          fileId.hashCode, // Unique ID for this task
+          fileId.hashCode,
           isUpload ? "Uploading..." : "Downloading...",
           "$fileName: ${(progress * 100).toStringAsFixed(1)}%",
           NotificationDetails(
@@ -84,25 +98,33 @@ void callbackDispatcher() {
               showProgress: true,
               maxProgress: 100,
               progress: (progress * 100).toInt(),
-              ongoing: true, // Keep notification visible during transfer
+              ongoing: true,
               color: Colors.blue,
             ),
           ),
         );
       }
 
-      // 4. Cleanup and Success Notification
-      await persistenceService.cleanupTransferMetadata(fileId);
 
       transferService.showCompletionNotification(
           taskId: fileId, fileName: fileName, isUpload: isUpload, isSuccess: true
       );
+
+      // Cleanup is safe now that the notification is triggered
+      await persistenceService.cleanupTransferMetadata(fileId);
 
       // WorkManager success signal
       return Future.value(true);
 
     } catch (e) {
       print('WorkManager Task Failed: $e');
+
+      // 🚨 FIX 2: Graceful handling for cancellation (User Pause)
+      if (e is DioException && e.type == DioExceptionType.cancel) {
+        print('WorkManager: Task was cancelled (e.g., user paused).');
+        // Return true so WorkManager doesn't retry this task immediately.
+        return Future.value(true);
+      }
 
       // On network failure or exception, notify user and signal retry
       transferService.showCompletionNotification(

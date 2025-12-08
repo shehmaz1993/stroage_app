@@ -1,5 +1,8 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter/material.dart'; // Used for Colors
+import 'package:flutter/material.dart';
+
+// Assuming apps_global.dart holds the navigatorKey
+import '../utils/apps_global.dart';
 
 class NotificationService {
   final FlutterLocalNotificationsPlugin notificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -10,9 +13,8 @@ class NotificationService {
 
   Future<void> initializeNotifications() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
-    AndroidInitializationSettings('@mipmap/ic_launcher'); // Use your app icon
+    AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    // On iOS, you usually require permission first
     const DarwinInitializationSettings initializationSettingsIOS =
     DarwinInitializationSettings(
       requestAlertPermission: true,
@@ -24,7 +26,39 @@ class NotificationService {
         android: initializationSettingsAndroid,
         iOS: initializationSettingsIOS);
 
-    await notificationsPlugin.initialize(initializationSettings);
+
+    final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+    notificationsPlugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+
+    if (androidImplementation != null) {
+      const AndroidNotificationChannel channel = AndroidNotificationChannel(
+        channelId, // Must match the channelId used in showCompletionNotification
+        channelName,
+        description: channelDescription,
+        importance: Importance.max,
+      );
+      // Create the channel before the general initialization
+      await androidImplementation.createNotificationChannel(channel);
+    }
+
+
+
+    await notificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) async {
+        final String? transferId = response.payload;
+
+        if (transferId != null && navigatorKey.currentState != null) {
+          // This logic is executed when the notification is tapped.
+
+          navigatorKey.currentState!.pushNamed(
+            '/transfer-detail', // Ensure this route is defined in your MaterialApp
+            arguments: transferId, // Pass the ID to the screen
+          );
+        }
+      },
+    );
   }
 
 
@@ -34,20 +68,21 @@ class NotificationService {
     required bool isUpload,
     required bool isSuccess,
   }) async {
-    final int notificationId = taskId.hashCode; // Use a hash of the ID for uniqueness
+    final int notificationId = taskId.hashCode;
     final String type = isUpload ? "Upload" : "Download";
     final String title = "$type ${isSuccess ? 'Complete' : 'Failed'}";
     final String body = "$fileName ${isSuccess ? 'finished successfully.' : 'failed. Tap to retry.'}";
+
+
     final Color color = isSuccess ? Colors.green : Colors.red;
 
     AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      channelId,
+      channelId, // Must match the created channel ID
       channelName,
       channelDescription: channelDescription,
       importance: Importance.max,
       priority: Priority.high,
       color: color,
-      // Setting autoCancel to true means the notification is dismissed when tapped
       autoCancel: true,
     );
 
@@ -58,7 +93,7 @@ class NotificationService {
       title,
       body,
       platformDetails,
-      payload: taskId, // Payload can be used to navigate the user back to the dashboard
+      payload: taskId,
     );
   }
 }
