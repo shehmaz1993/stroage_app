@@ -1,9 +1,13 @@
 import 'dart:async';
 
 enum TransferStatus { pending, uploading, downloading,paused, complete, failed }
-extension TransferStatusExtension on TransferStatus {
-  bool get isActive => this == TransferStatus.uploading || this == TransferStatus.downloading;
+extension TransferStatusModelProperties on TransferStatus {
+  bool get isActive => this == TransferStatus.uploading ||
+      this == TransferStatus.downloading ||
+      this == TransferStatus.pending;
+
   bool get isDone => this == TransferStatus.complete || this == TransferStatus.failed;
+
 }
 
 class FileTransfer {

@@ -1,4 +1,4 @@
-// transfer_tile_widget.dart (or part of transfer_widgets.dart)
+
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,9 +8,9 @@ import '../models/transfer_model.dart';
 import '../providers/transfer_providers.dart';
 import '../state/transfer_notifier.dart';
 
-class TransferTileWidget extends ConsumerWidget { // ⬅️ ConsumerWidget for Riverpod access
+class TransferTileWidget extends ConsumerWidget {
   final FileTransfer transfer;
-  final bool isActionable; // Determines if Pause/Resume buttons should appear
+  final bool isActionable;
 
   const TransferTileWidget({
     required this.transfer,
@@ -52,7 +52,7 @@ class TransferTileWidget extends ConsumerWidget { // ⬅️ ConsumerWidget for R
             ),
             const SizedBox(height: 8),
 
-            // --- Progress Bar ---
+
             if (transfer.status.isActive || transfer.status == TransferStatus.paused)
               LinearProgressIndicator(
                 value: transfer.progress,
@@ -62,7 +62,7 @@ class TransferTileWidget extends ConsumerWidget { // ⬅️ ConsumerWidget for R
 
             const SizedBox(height: 8),
 
-            // --- Details and Actions ---
+
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

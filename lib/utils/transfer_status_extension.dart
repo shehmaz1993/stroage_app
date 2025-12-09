@@ -33,9 +33,9 @@ extension TransferStatusVisuals on TransferStatus {
     }
   }
 
-  // Use isActive which is already defined in the model file
+
   bool get canControl {
-    // 💡 IMPORTANT: Ensure you have access to the model file's extension property 'isActive'
-    return this == TransferStatus.paused || this.isActive;
+
+    return this == TransferStatus.paused || isActive;
   }
 }

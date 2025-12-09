@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:async';
+import 'package:collection/collection.dart';
 
+import '../exceptions/transfer_exceptions.dart';
 import '../models/transfer_model.dart';
 import '../services/transfer_service.dart';
+
 
 class TransferNotifier extends StateNotifier<List<FileTransfer>> {
   final TransferService _service;
@@ -41,6 +44,9 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
       print('Notifier: Upload completed! Download URL retrieved: $downloadUrl');
 
+      // Update state with file URL
+      state = state.map((t) => t.id == id ? t.copyWith(fileUrl: downloadUrl) : t).toList();
+
       await _service.saveDownloadableFileMetadata(
         fileId: id,
         fileName: fileName,
@@ -50,9 +56,13 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
       markAsComplete(id);
 
-    } catch (error) {
+    } on TransferCancelledException { // ⬅️ FIX: CATCH CANCELLATION EXPLICITLY
+      // When paused, the service throws this exception. We ignore it here
+      // because the status update to PAUSED is handled by pauseTransfer().
+      print('Notifier: Upload successfully paused (cancellation ignored).');
+    } catch (error) { // ⬅️ CATCH TRUE FAILURE
       markAsFailed(id);
-      print('Notifier: Upload failed or was cancelled: $error');
+      print('Notifier: Upload failed due to error: $error');
     }
   }
 
@@ -62,8 +72,6 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
     final id = DateTime.now().millisecondsSinceEpoch.toString();
     final int totalBytes = _parseSizeStringToBytes(fileSize);
 
-
-
     final newTransfer = FileTransfer(
       id: id,
       name: fileName,
@@ -72,7 +80,7 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
       status: TransferStatus.downloading,
       totalBytes: totalBytes,
       filePath: savePath,
-      fileUrl: fileUrl, // Already set here
+      fileUrl: fileUrl,
     );
 
     state = [...state, newTransfer];
@@ -87,10 +95,12 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
     );
 
     // 2. Listen to the stream and update the state
+    // Note: For downloads using streams, cancellation is handled via subscription.cancel()
+    // which simply stops the stream, not typically throwing into a try/catch.
     final subscription = progressStream.listen(
           (progress) => updateProgress(id, progress),
       onDone: () => markAsComplete(id),
-      onError: (error) => markAsFailed(id),
+      onError: (error) => markAsFailed(id), // ⬅️ No change needed here for stream errors
     );
 
     // 3. Update the transfer object with its subscription (for pause/resume)
@@ -101,22 +111,23 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
   void pauseTransfer(String id) {
 
+    // Ensure isActive includes 'pending' to allow pausing before start
     final transfer = state.where((t) => t.id == id && t.status.isActive).firstOrNull;
 
     if (transfer == null) return; // Exit if transfer is not found or not active
 
-    // Cancel the underlying network request via the service
+    // Cancel the underlying network request via the service (This causes the exception to be thrown)
     _service.cancelTransfer(id);
 
     if (transfer.isUpload) {
       // For uploads, we rely on the service to stop the Dio process and save progress
       _service.saveProgressBytes(id, _getCurrentBytes(transfer));
     } else if (transfer.subscription != null) {
-      // For downloads, cancel the listener
+      // For downloads, cancel the listener (stops the stream without throwing failure)
       transfer.subscription!.cancel();
     }
 
-    // Update the state to paused
+    // Update the state to paused (This happens immediately, regardless of the exception in startUpload)
     state = state.map((t) => t.id == id ? t.copyWith(status: TransferStatus.paused, subscription: null) : t).toList();
   }
 
@@ -148,10 +159,16 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
           onProgressUpdate: (progress) => updateProgress(id, progress),
         );
 
+        // Update state with file URL upon completion
+        state = state.map((t) => t.id == id ? t.copyWith(fileUrl: downloadUrl) : t).toList();
+
         await _service.saveDownloadableFileMetadata(
             fileId: id, fileName: fileName, fileUrl: downloadUrl, size: transfer.size);
         markAsComplete(id);
-      } catch (error) {
+
+      } on TransferCancelledException { // ⬅️ FIX: CATCH CANCELLATION EXPLICITLY
+        print('Notifier: Resumed upload successfully paused (cancellation ignored).');
+      } catch (error) { // ⬅️ CATCH TRUE FAILURE
         markAsFailed(id);
       }
 
@@ -234,23 +251,21 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
     state = state.map((t) => t.id == id ? t.copyWith(status: TransferStatus.failed, subscription: null) : t).toList();
   }
+
   Future<List<Map<String, String>>> fetchDownloadableFiles() async {
     // Simulate a quick fetch/lookup time
     await Future.delayed(const Duration(milliseconds: 100));
 
-    // 1. Filter the current list of transfers in the state.
-    // We look for files that are complete AND were initiated as uploads (isUpload: true).
+    // Filter out any transfers where fileUrl is null
     final downloadableTransfers = state.where((t) =>
-    t.status == TransferStatus.complete && t.isUpload
+    t.status == TransferStatus.complete && t.isUpload && t.fileUrl != null
     ).toList();
 
     // 2. Map the filtered FileTransfer objects to the necessary metadata format.
     return downloadableTransfers.map((t) => {
       'fileName': t.name,
-      // The FileUrl is the key piece of information needed to start a new download request
       'fileUrl': t.fileUrl!,
       'size': t.size,
-      // totalBytes is optional here but useful if needed for new download status tracking
       'totalBytes': t.totalBytes.toString(),
     }).toList();
   }

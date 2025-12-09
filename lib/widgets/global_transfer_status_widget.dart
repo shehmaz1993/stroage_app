@@ -6,18 +6,22 @@ import 'package:storage_app/models/transfer_model.dart';
 import 'package:storage_app/widgets/transfer_tile_widget.dart';
 import 'package:storage_app/widgets/transfer_widget.dart';
 
+
 import '../providers/transfer_providers.dart';
 // import '../providers/transfer_provider.dart';
-// import 'transfer_tile_widget.dart'; // Import the common tile
+
 
 class GlobalTransferStatus extends ConsumerWidget {
   const GlobalTransferStatus({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final notifier =  ref.read(transferNotifierProvider.notifier);
+
     final activeTransfers = ref.watch(transferNotifierProvider)
         .where((t) => t.status.isActive || t.status == TransferStatus.paused)
         .toList();
+
 
     if (activeTransfers.isEmpty) {
       return const SizedBox.shrink();
@@ -43,7 +47,7 @@ class GlobalTransferStatus extends ConsumerWidget {
               ...activeTransfers.take(2).map((t) {
                 return TransferTileWidget(
                   transfer: t,
-                  isActionable: false, // ⬅️ No actions in the summary banner
+                  isActionable: false
                 );
               }),
 

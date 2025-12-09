@@ -15,6 +15,7 @@ import '../../widgets/transfer_widget.dart';
 
 
 
+
 class UploadScreen extends ConsumerWidget {
   const UploadScreen({super.key});
 
@@ -32,14 +33,6 @@ class UploadScreen extends ConsumerWidget {
     final fileSelector = ref.read(fileSelectionServiceProvider); // Assuming this provider exists
     final result = await fileSelector.pickFile(); // Call the actual service
 
-    // --- REMOVE THE TEMPORARY MOCK BLOCK COMPLETELY ---
-    /*
-    final result = FileSelectionResult(
-      filePath: '/path/to/my/video.mp4',
-      fileName: 'AwesomeVideo.mp4',
-      byteSize: 150 * 1024 * 1024, // Mock 150 MB file
-    );
-    */
 
     if (result != null) {
       // **CRITICAL FIX: Copy the file to a permanent location**
@@ -59,9 +52,9 @@ class UploadScreen extends ConsumerWidget {
 
         final String humanReadableSize = _formatBytes(result.byteSize);
 
-        // Initiate upload using the permanent path
+
         notifier.startNewUpload(
-          permanentFile.path, // <-- Pass the permanent path
+          permanentFile.path,
           result.fileName,
           humanReadableSize,
         );
@@ -90,7 +83,7 @@ class UploadScreen extends ConsumerWidget {
 
     // Filter to show only active/pending uploads for this screen
     final activeUploads = transfers
-        .where((t) => t.isUpload && !t.status.isDone)
+        .where((t) => t.isUpload && (t.status.isActive || t.status == TransferStatus.paused))
         .toList();
 
     return Scaffold(
@@ -141,7 +134,7 @@ class UploadScreen extends ConsumerWidget {
                       ...activeUploads.map((transfer) => TransferTileWidget(
                         transfer: transfer,
                        // notifier: notifier,
-                        isActionable: true,
+                        isActionable: true
                       )),
                     ],
                   ),
@@ -149,12 +142,6 @@ class UploadScreen extends ConsumerWidget {
             ),
           ),
 
-          // 2. Persistent Bottom Button Area (Reusable Widget)
-        /*  SelectFileButton(
-            text: 'Select File to Upload',
-            icon: Icons.upload_file,
-            onPressed: () => _startFileSelection(context, ref, notifier), // Pass ref here
-          ),*/
         ],
       ),
     );

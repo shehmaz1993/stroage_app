@@ -1,14 +1,52 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:storage_app/models/transfer_model.dart';
+import 'package:storage_app/utils/transfer_status_extension.dart';
+import '../../providers/transfer_providers.dart';
 
-// NOTE: You would typically use providers (like connectivity_plus or device_info_plus)
-// and watch your TransferNotifier here to get real data.
-// For this UI implementation, we use mock data.
-
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final transfers = ref.watch(transferNotifierProvider);
+
+    // --- Core Filters ---
+    final completedTransfers = transfers
+        .where((t) => t.status == TransferStatus.complete)
+        .toList();
+
+    final failedTransfers = transfers
+        .where((t) => t.status == TransferStatus.failed)
+        .toList();
+
+    // Filter for specifically Paused Transfers
+    final pausedTransfers = transfers
+        .where((t) => t.status == TransferStatus.paused)
+        .toList();
+
+    // Filter for specifically Pending Uploads (waiting to start)
+    // NOTE: This should target only uploads to prevent grouping pending downloads here.
+    final pendingUploads = transfers
+        .where((t) => t.status == TransferStatus.pending && t.isUpload)
+        .toList();
+
+    // Combine all "waiting" transfers for a unified dashboard view
+    final waitingTransfers = [...pendingUploads, ...pausedTransfers];
+
+    // Filter for Active (Running) Transfers ONLY
+    // Excludes 'pending' because we now show them in 'waitingTransfers'.
+    final runningTransfers = transfers
+        .where((t) => t.status.isActive && t.status != TransferStatus.pending)
+        .toList();
+
+
+    // Grouping uploads and downloads for the dashboard view
+    final runningUploads = runningTransfers.where((t) => t.isUpload).toList();
+    final downloadedFiles = completedTransfers.where((t) => !t.isUpload).toList();
+    final uploadedFiles = completedTransfers.where((t) => t.isUpload).toList();
+
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Column(
@@ -20,84 +58,140 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // --- 1. Status and Diagnostics ---
-
-          const Text('App Health', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          // --- Transfer Activity Overview (LIVE DATA) ---
+          const Text('Transfer Activity', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const Divider(),
 
-          // Network Connectivity Status (Mock)
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.wifi, color: Colors.green),
-              title: Text('Network Connectivity'),
-              subtitle: Text('Online (Wi-Fi)'),
-              trailing: Icon(Icons.check_circle, color: Colors.green),
-            ),
+          // Active (Running) Uploads
+          _buildTransferList(
+            context,
+            title: 'Active Uploads (${runningUploads.length})',
+            icon: Icons.upload,
+            color: Colors.blue,
+            liveItems: runningUploads,
           ),
           const SizedBox(height: 10),
 
-          // Background Service Status (Mock)
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.work, color: Colors.blue),
-              title: Text('Background Service'),
-              subtitle: Text('WorkManager Initialized and Active.'),
-            ),
+          // Paused/Pending Transfers (ALL WAITING FILES)
+          _buildTransferList(
+            context,
+            title: 'Paused & Pending (${waitingTransfers.length})',
+            icon: Icons.pause_circle_filled,
+            color: Colors.orange,
+            liveItems: waitingTransfers,
           ),
+          const SizedBox(height: 10),
 
+          // Completed Uploads
+          _buildTransferList(
+            context,
+            title: 'Uploaded Files (${uploadedFiles.length})',
+            icon: Icons.check_circle_outline,
+            color: Colors.green,
+            // Showing all completed files, reversed to show newest first
+            liveItems: uploadedFiles.reversed.toList(),
+          ),
           const SizedBox(height: 30),
 
-          // --- 2. Storage Metrics ---
-
-          const Text('Storage Usage', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          const Divider(),
-
-          _buildStorageGauge(context, usedGB: 8.5, totalGB: 32),
-
-          const SizedBox(height: 30),
-
-          // --- 3. Quick Action & Recent Activity ---
-
-          const Text('Activity & Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          const Divider(),
-
-          // Mock Recent Failed Transfer
-          const Card(
-            color: Colors.red,
-            child: ListTile(
-              leading: Icon(Icons.error, color: Colors.white),
-              title: Text('3 Transfers Failed Recently', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              subtitle: Text('Tap to review and resume.', style: TextStyle(color: Colors.white70)),
-              trailing: Icon(Icons.arrow_forward_ios, color: Colors.white),
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // Quick Action Button
-          Center(
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.cloud_upload_outlined, size: 24),
-              label: const Text('Start New Upload', style: TextStyle(fontSize: 16)),
-              onPressed: () {
-                // In the real app, this should set the parent DashboardScreen's
-                // index to 1 (the Upload tab)
-                ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Switched to Upload Tab (Index 1)'))
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
+          // Failed Transfers Banner
+          if (failedTransfers.isNotEmpty)
+            Card(
+              color: Colors.red,
+              child: ListTile(
+                leading: const Icon(Icons.error, color: Colors.white),
+                title: Text('${failedTransfers.length} Transfers Failed Recently', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                subtitle: const Text('Tap to review and resume.', style: TextStyle(color: Colors.white70)),
+                trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white),
               ),
             ),
-          ),
         ],
       ),
     );
   }
 
+  // --- Helper Widget for Transfer Lists (UPDATED TO SHOW ALL ITEMS) ---
+  Widget _buildTransferList(
+      BuildContext context, {
+        required String title,
+        required IconData icon,
+        required Color color,
+        required List<FileTransfer> liveItems,
+        VoidCallback? onTap,
+      }) {
+    return Card(
+      elevation: 2,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: color, size: 24),
+                  const SizedBox(width: 8),
+                  Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+                ],
+              ),
+              const Divider(height: 16),
+
+              if (liveItems.isEmpty)
+                Text('No ${title.split(" ").first} items.', style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[600])),
+
+              // Display ALL live items (NO .take(2) LIMIT)
+              ...liveItems.map((transfer) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 1. Name and Size Row
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Text(
+                              transfer.name,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
+                          ),
+                        ),
+                        Text(
+                          transfer.size,
+                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // 2. ID Row
+                    Text(
+                        'ID: ${transfer.id}',
+                        style: TextStyle(fontSize: 10, color: Colors.grey[500], fontStyle: FontStyle.italic)
+                    ),
+                    // Progress Bar for Active/Paused transfers
+                    if (transfer.status.isActive || transfer.status == TransferStatus.paused)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6.0),
+                        child: LinearProgressIndicator(
+                          value: transfer.progress,
+                          color: transfer.status.color,
+                          backgroundColor: Colors.grey[200],
+                          minHeight: 4,
+                        ),
+                      ),
+                  ],
+                ),
+              )).toList(),
+
+              // REMOVED: The conditional '+N more...' text is gone.
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- Helper Widget for Storage Gauge (Unchanged) ---
   Widget _buildStorageGauge(BuildContext context, {required double usedGB, required double totalGB}) {
     final double percentage = usedGB / totalGB;
     final Color color = percentage > 0.8 ? Colors.red : percentage > 0.5 ? Colors.orange : Colors.blue;
@@ -112,24 +206,13 @@ class HomeScreen extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Local Device Storage', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text(
-                  '${usedGB.toStringAsFixed(1)} GB / ${totalGB.toStringAsFixed(0)} GB',
-                  style: TextStyle(color: color, fontWeight: FontWeight.bold),
-                ),
+                Text('${usedGB.toStringAsFixed(1)} GB / ${totalGB.toStringAsFixed(0)} GB', style: TextStyle(color: color, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 10),
-            LinearProgressIndicator(
-              value: percentage,
-              backgroundColor: Colors.grey[300],
-              color: color,
-              minHeight: 12,
-            ),
+            LinearProgressIndicator(value: percentage, backgroundColor: Colors.grey[300], color: color, minHeight: 12),
             const SizedBox(height: 5),
-            Text(
-              '${((1 - percentage) * totalGB).toStringAsFixed(1)} GB Available',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
+            Text('${((1 - percentage) * totalGB).toStringAsFixed(1)} GB Available', style: const TextStyle(fontSize: 12, color: Colors.grey)),
           ],
         ),
       ),

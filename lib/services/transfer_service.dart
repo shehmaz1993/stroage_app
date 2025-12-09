@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:storage_app/services/transfer_persistance_service.dart';
 
+
+import '../exceptions/transfer_exceptions.dart';
 import 'api_services.dart';
 import 'background_manager.dart';
 import 'local_notification_service.dart';
@@ -12,7 +14,7 @@ class TransferService {
   final ApiProvider _apiProvider;
   final NotificationService _notificationService;
   final TransferPersistenceService _persistenceService;
-  // 🎯 NEW: Map to store Dio CancelToken instances by taskId for cancellation
+  // Map to store Dio CancelToken instances by taskId for cancellation
   final Map<String, CancelToken> _cancelTokens = {};
 
   // Constructor receives all dependencies via Riverpod
@@ -30,7 +32,7 @@ class TransferService {
     required String fileName,
     required String taskId,
     required int startByte,
-    required Function(double progress) onProgressUpdate, // 🎯 NEW progress update callback
+    required Function(double progress) onProgressUpdate,
   }) async {
     final cancelToken = CancelToken();
     _cancelTokens[taskId] = cancelToken;
@@ -45,15 +47,23 @@ class TransferService {
         startByte: startByte,
         cancelToken: cancelToken,
 
-        // 🎯 Dio's callback (int sent, int total) is mapped to notifier's (double progress)
+        // Dio's callback (int sent, int total) is mapped to notifier's (double progress)
         onSendProgress: (count, total) {
           double totalBytesSent = (count + startByte).toDouble();
           double progress = totalBytesSent / fileLength;
           onProgressUpdate(progress); // Pass calculated progress to the Notifier
         },
       );
-      return downloadUrl; // 🎯 Return the URL to the Notifier
+      return downloadUrl; // Return the URL to the Notifier
+    } on DioException catch (e) { // ⬅️ FIX: CATCH DioException
+      if (e.type == DioExceptionType.cancel) {
+        // 🚨 CRITICAL FIX: Throw the custom exception to signal pause to the Notifier
+        throw TransferCancelledException('Upload was paused by user.');
+      }
+      // If it's any other Dio error (network error, timeout, etc.), rethrow it as a true failure.
+      rethrow;
     } catch (e) {
+      // Catch non-Dio errors (like file system errors)
       rethrow;
     } finally {
       _cancelTokens.remove(taskId);
@@ -79,7 +89,6 @@ class TransferService {
     return controller.stream;
   }
 
-  // 🚨 CORRECTION 2: Separate the asynchronous execution logic into a private method
   void _startDownloadAsync(
       String fileUrl,
       String savePath,
@@ -94,25 +103,18 @@ class TransferService {
     final cancelToken = CancelToken();
     _cancelTokens[taskId] = cancelToken;
 
-    // 🎯 NOTE: We need the full file size (total bytes) for accurate progress
-    // calculation when resuming downloads. This size should ideally be passed
-    // from the TransferNotifier/FileTransfer model.
-
     try {
       // 2. Delegate the network task to the ApiProvider
       await _apiProvider.downloadFile(
         fileUrl: fileUrl,
         savePath: savePath,
-        // The ApiProvider should handle the actual progress calculation (count / total)
-        // Note: For resumed downloads, total will often be the REMAINING size
-        // if the server supports it, so the notifier must handle the final progress calculation.
         onReceiveProgress: (count, total) {
           if (total != -1) {
             // We pass Dio's progress directly to the controller
             controller.add(count / total);
           }
         },
-        fileId: taskId, // 🚨 CORRECTION 3: Use the actual taskId
+        fileId: taskId,
         startByte: startByte,
         cancelToken: cancelToken,
       );
@@ -121,7 +123,15 @@ class TransferService {
       controller.add(1.0);
 
     } on DioException catch (e) {
-      // Signal error
+      if (e.type == DioExceptionType.cancel) {
+        // If cancelled (paused), do NOT add an error to the stream.
+        print('Service: Download was cancelled/paused.');
+      } else if (!controller.isClosed) {
+        // Signal other errors
+        controller.addError(e);
+      }
+    } catch (e) {
+      // Handle other non-Dio exceptions
       if (!controller.isClosed) {
         controller.addError(e);
       }
@@ -137,23 +147,21 @@ class TransferService {
   void cancelTransfer(String id) {
     final token = _cancelTokens[id];
     if (token != null && !token.isCancelled) {
+      // 🚨 When this is called, it triggers the DioExceptionType.cancel in startUpload/Download
       token.cancel('Transfer paused/cancelled by user or app.');
       _cancelTokens.remove(id);
     }
   }
 
 
-  // 🎯 NEW: Expose method to retrieve saved bytes from persistence
   Future<int?> getSavedBytes(String id) {
     return _persistenceService.getLastSavedByteCount(id);
   }
 
   Future<void> cleanupTransferMetadata(String id) {
-    // Delegate the task to the persistence service
     return _persistenceService.cleanupTransferMetadata(id);
   }
   Future<void> saveProgressBytes(String id, int byteCount) {
-    // Delegates the actual persistence job to the Persistence Service
     return _persistenceService.saveCurrentByteCount(id, byteCount);
   }
   Future<void> saveDownloadableFileMetadata({
@@ -162,7 +170,6 @@ class TransferService {
     required String fileUrl,
     required String size,
   }) async {
-    // 🎯 Delegate to the persistence layer (which needs to be implemented/updated)
     await _persistenceService.saveDownloadableFileMetadata(
       fileId: fileId,
       fileName: fileName,
@@ -177,14 +184,12 @@ class TransferService {
 
   // --- External Service Hooks ---
 
-  /// Handles saving metadata and registering the WorkManager task sequentially.
   void _registerBackgroundAndPersistData(
       String taskId,
       bool isUpload,
-      String path, // Path is source for upload, destination for download
-          {required String fileName, String? fileUrl}
+      String path,
+      {required String fileName, String? fileUrl}
       ) {
-    // 1. Persist the data first
     _persistenceService.saveTransferMetadata(
       id: taskId,
       filePath: path,
@@ -192,7 +197,6 @@ class TransferService {
       isUpload: isUpload,
       fileUrl: fileUrl,
     ).then((_) {
-      // 2. Register native task only after persistence is confirmed
       registerWorkManagerTask(
         taskId: taskId,
         isUpload: isUpload,
@@ -200,7 +204,6 @@ class TransferService {
     });
   }
 
-  /// Triggers a persistent system notification using the dedicated service.
   void showCompletionNotification({
     required String taskId,
     required String fileName,
