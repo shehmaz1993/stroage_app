@@ -2,13 +2,9 @@
 import 'package:flutter/material.dart';
 
 import '../models/transfer_model.dart';
-// import '.../models/transfer_model.dart'; // Import the file containing TransferStatus
 
-// Note: This extension MUST NOT contain 'isActive' or 'isDone'
-// if they are already defined in your model file.
 extension TransferStatusVisuals on TransferStatus {
-  // You must use the existing 'isActive' property defined in your model file:
-  // bool get isActive => this == TransferStatus.uploading || this == TransferStatus.downloading;
+
 
   Color get color {
     switch (this) {
