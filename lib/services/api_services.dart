@@ -29,6 +29,7 @@ class ApiProvider{
           options.headers['Authorization'] = 'Bearer $_accessToken';
         }
         return handler.next(options);
+
       },
       onError: (e, handler) async {
         if (e.response?.statusCode == 401 && _accessToken != null) {
@@ -138,7 +139,7 @@ class ApiProvider{
         updateAppUrl,
         data: formData,
         options: options,
-        onSendProgress: onSendProgress, // 🎯 Pass the callback directly to Dio
+        onSendProgress: onSendProgress,
         cancelToken: cancelToken,
       );
 
@@ -154,7 +155,7 @@ class ApiProvider{
         final mockDownloadUrl = response.data.toString();
 
         return mockDownloadUrl; // 🎯 Return the Download URL, fulfilling the Future<String>
-        // --- MOCK LOGIC END ---
+
       } else {
         throw Exception('Upload failed with status: ${response.statusCode}');
       }
@@ -183,6 +184,7 @@ class ApiProvider{
     if (startByte > 0) {
 
       options.headers?['Range'] = 'bytes=$startByte-';
+
     }
 
     return _dio.download(

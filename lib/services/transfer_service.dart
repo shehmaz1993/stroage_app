@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:storage_app/services/transfer_persistance_service.dart';
 
 
+import '../exceptions/network_exception.dart';
 import '../exceptions/transfer_exceptions.dart';
 import 'api_services.dart';
 import 'background_manager.dart';
@@ -24,7 +25,7 @@ class TransferService {
       this._persistenceService
       );
 
-  // --- Core Upload Logic ---
+
 
   /// Initiates the file upload process, starting from a specific byte offset.
   Future<String> startUpload({
@@ -47,21 +48,26 @@ class TransferService {
         startByte: startByte,
         cancelToken: cancelToken,
 
-        // Dio's callback (int sent, int total) is mapped to notifier's (double progress)
+
         onSendProgress: (count, total) {
           double totalBytesSent = (count + startByte).toDouble();
           double progress = totalBytesSent / fileLength;
-          onProgressUpdate(progress); // Pass calculated progress to the Notifier
+          double finalProgress = progress.clamp(0.0, 1.0);
+          onProgressUpdate(finalProgress); // Pass calculated progress to the Notifier
         },
       );
       return downloadUrl; // Return the URL to the Notifier
-    } on DioException catch (e) { // ⬅️ FIX: CATCH DioException
-      if (e.type == DioExceptionType.cancel) {
-        // 🚨 CRITICAL FIX: Throw the custom exception to signal pause to the Notifier
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel){
+
         throw TransferCancelledException('Upload was paused by user.');
       }
-      // If it's any other Dio error (network error, timeout, etc.), rethrow it as a true failure.
-      rethrow;
+      String failureMessage = _getFailureMessage(e);
+
+      throw NetworkFailureException(
+          message: failureMessage,
+          originalError: e
+      );
     } catch (e) {
       // Catch non-Dio errors (like file system errors)
       rethrow;
@@ -110,7 +116,7 @@ class TransferService {
         savePath: savePath,
         onReceiveProgress: (count, total) {
           if (total != -1) {
-            // We pass Dio's progress directly to the controller
+
             controller.add(count / total);
           }
         },
@@ -124,11 +130,14 @@ class TransferService {
 
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
-        // If cancelled (paused), do NOT add an error to the stream.
         print('Service: Download was cancelled/paused.');
       } else if (!controller.isClosed) {
-        // Signal other errors
-        controller.addError(e);
+
+        String failureMessage = _getFailureMessage(e);
+        controller.addError(NetworkFailureException(
+            message: failureMessage,
+            originalError: e
+        ));
       }
     } catch (e) {
       // Handle other non-Dio exceptions
@@ -179,6 +188,29 @@ class TransferService {
   }
   Future<List<Map<String, dynamic>>> getDownloadableFilesMetadata() async {
     return _persistenceService.getDownloadableFiles();
+  }
+  String _getFailureMessage(DioException e) {
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return "Connection timed out. Please check your network.";
+      case DioExceptionType.badResponse:
+        final statusCode = e.response?.statusCode;
+        if (statusCode == 404) {
+          return "File not found on the server (Error 404).";
+        } else if (statusCode != null && statusCode >= 500) {
+          return "Server error occurred (Error $statusCode). Try again later.";
+        }
+        return "Received an invalid server response.";
+      case DioExceptionType.unknown:
+      case DioExceptionType.connectionError:
+        return "No internet connection or network failure detected.";
+      case DioExceptionType.badCertificate:
+        return "Security certificate error.";
+      default:
+        return "An unknown network error occurred.";
+    }
   }
 
 

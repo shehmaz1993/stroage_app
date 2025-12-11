@@ -14,24 +14,23 @@ class DownloadScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Watch all transfers for real-time updates
+
 
     final transfers = ref.watch(transferNotifierProvider);
 
 
-    // Fetch files available for download (Source List)
     final futureDownloadableFiles = ref.watch(
-      // The FutureProvider handles fetching the data once (Mock or API call)
+
         FutureProvider((ref) => ref.read(transferNotifierProvider.notifier).fetchDownloadableFiles())
     );
 
-    // Filter transfers for organization
+
     final activeTransfers = transfers.where((t) => t.status.isActive || t.status == TransferStatus.paused).toList();
     final completedTransfers = transfers.where((t) => t.status == TransferStatus.complete).toList();
 
     return Column(
       children: [
-        // --- Section 1: Files Available to Download (Source List) ---
+
         Padding(
           padding: const EdgeInsets.only(top: 16.0, left: 16.0, right: 16.0),
           child: Text('Files Available to Download', style: Theme.of(context).textTheme.titleLarge),
@@ -107,15 +106,14 @@ class DownloadScreen extends ConsumerWidget {
 }
 
 
-// --- Helper Function ---
-/// Helper to generate a safe file path in the app's document directory.
+
 Future<String> _getDownloadPath(String fileName) async {
   final directory = await getApplicationDocumentsDirectory();
   return '${directory.path}/$fileName';
 }
 
 
-// --- Download Initiation Button (Specific to this screen) ---
+
 class DownloadInitiationButton extends ConsumerWidget {
   final FileTransfer? existingTransfer;
   final Map<String, dynamic> fileMetadata;

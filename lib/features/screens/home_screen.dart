@@ -11,7 +11,7 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final transfers = ref.watch(transferNotifierProvider);
 
-    // --- Core Filters ---
+
     final completedTransfers = transfers
         .where((t) => t.status == TransferStatus.complete)
         .toList();
@@ -20,28 +20,26 @@ class HomeScreen extends ConsumerWidget {
         .where((t) => t.status == TransferStatus.failed)
         .toList();
 
-    // Filter for specifically Paused Transfers
+
     final pausedTransfers = transfers
         .where((t) => t.status == TransferStatus.paused)
         .toList();
 
-    // Filter for specifically Pending Uploads (waiting to start)
-    // NOTE: This should target only uploads to prevent grouping pending downloads here.
+
     final pendingUploads = transfers
         .where((t) => t.status == TransferStatus.pending && t.isUpload)
         .toList();
 
-    // Combine all "waiting" transfers for a unified dashboard view
+
     final waitingTransfers = [...pendingUploads, ...pausedTransfers];
 
-    // Filter for Active (Running) Transfers ONLY
-    // Excludes 'pending' because we now show them in 'waitingTransfers'.
+
     final runningTransfers = transfers
         .where((t) => t.status.isActive && t.status != TransferStatus.pending)
         .toList();
 
 
-    // Grouping uploads and downloads for the dashboard view
+
     final runningUploads = runningTransfers.where((t) => t.isUpload).toList();
     final downloadedFiles = completedTransfers.where((t) => !t.isUpload).toList();
     final uploadedFiles = completedTransfers.where((t) => t.isUpload).toList();
@@ -57,10 +55,13 @@ class HomeScreen extends ConsumerWidget {
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 20),
+          _buildStorageGauge( context, usedGB: 8,totalGB: 20),
+          const SizedBox(height: 20),
 
           // --- Transfer Activity Overview (LIVE DATA) ---
           const Text('Transfer Activity', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          const Divider(),
+          const SizedBox(height: 20),
+          //const Divider(),
 
           // Active (Running) Uploads
           _buildTransferList(
@@ -191,7 +192,7 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  // --- Helper Widget for Storage Gauge (Unchanged) ---
+
   Widget _buildStorageGauge(BuildContext context, {required double usedGB, required double totalGB}) {
     final double percentage = usedGB / totalGB;
     final Color color = percentage > 0.8 ? Colors.red : percentage > 0.5 ? Colors.orange : Colors.blue;

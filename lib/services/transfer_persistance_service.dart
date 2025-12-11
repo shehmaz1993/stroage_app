@@ -1,17 +1,15 @@
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert'; // Required for jsonEncode/jsonDecode
+import 'dart:convert';
 
 class TransferPersistenceService {
 
-  // --- KEY DEFINITIONS ---
 
-  // Prefix for saving individual transfer metadata (progress, path for ongoing jobs)
   static const String _transferPrefix = 'transfer_';
 
-  // Key for saving the list of successfully uploaded files (for the Download Screen)
+
   static const String _downloadableFilesKey = 'downloadable_files_list';
 
-  // --- NEW DOWNLOADABLE FILE MANAGEMENT ---
+
 
   /// Saves the metadata for a successfully uploaded file, making it available for download.
   Future<void> saveDownloadableFileMetadata({
@@ -35,8 +33,7 @@ class TransferPersistenceService {
     List<Map<String, dynamic>> downloadableFiles = [];
 
     if (existingJson != null) {
-      // Decode the existing list
-      // Ensure safe casting from dynamic List to List<Map<String, dynamic>>
+
       downloadableFiles = (jsonDecode(existingJson) as List)
           .map((item) => item as Map<String, dynamic>)
           .toList();
@@ -45,7 +42,7 @@ class TransferPersistenceService {
       downloadableFiles.removeWhere((file) => file['fileId'] == fileId);
     }
 
-    // 3. Add the new metadata and re-save the list
+
     downloadableFiles.add(newFileMetadata);
     await prefs.setString(_downloadableFilesKey, jsonEncode(downloadableFiles));
 

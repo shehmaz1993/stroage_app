@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:async';
 import 'package:collection/collection.dart';
 
+import '../exceptions/network_exception.dart';
 import '../exceptions/transfer_exceptions.dart';
 import '../models/transfer_model.dart';
 import '../services/transfer_service.dart';
@@ -56,11 +57,16 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
       markAsComplete(id);
 
-    } on TransferCancelledException { // ⬅️ FIX: CATCH CANCELLATION EXPLICITLY
-      // When paused, the service throws this exception. We ignore it here
-      // because the status update to PAUSED is handled by pauseTransfer().
+    } on TransferCancelledException {
+
       print('Notifier: Upload successfully paused (cancellation ignored).');
-    } catch (error) { // ⬅️ CATCH TRUE FAILURE
+
+    }on NetworkFailureException catch (e) {
+      markAsFailed(id);
+      // Log the specific user-friendly message from the service
+      print('Notifier: Upload failed due to Network error: ${e.message}');
+    }
+    catch (error) {
       markAsFailed(id);
       print('Notifier: Upload failed due to error: $error');
     }
@@ -100,7 +106,15 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
     final subscription = progressStream.listen(
           (progress) => updateProgress(id, progress),
       onDone: () => markAsComplete(id),
-      onError: (error) => markAsFailed(id), // ⬅️ No change needed here for stream errors
+      onError: (error) {
+        if (error is NetworkFailureException) {
+          markAsFailed(id);
+          print('Notifier: Download stream failed: ${error.message}');
+        } else {
+          markAsFailed(id);
+          print('Notifier: Download stream failed due to unknown error: $error');
+        }
+      },
     );
 
     // 3. Update the transfer object with its subscription (for pause/resume)
@@ -133,7 +147,9 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
 
   void resumeTransfer(String id) async {
     // Safe lookup is guaranteed since resume is only called on paused transfers
-    final transfer = state.firstWhere((t) => t.id == id && t.status == TransferStatus.paused);
+    final transfer = state.firstWhere((t) =>
+    t.id == id && (t.status == TransferStatus.paused || t.status == TransferStatus.failed)
+    );
 
     final lastSavedBytes = await _service.getSavedBytes(id) ?? 0;
 
@@ -166,9 +182,9 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
             fileId: id, fileName: fileName, fileUrl: downloadUrl, size: transfer.size);
         markAsComplete(id);
 
-      } on TransferCancelledException { // ⬅️ FIX: CATCH CANCELLATION EXPLICITLY
+      } on TransferCancelledException {
         print('Notifier: Resumed upload successfully paused (cancellation ignored).');
-      } catch (error) { // ⬅️ CATCH TRUE FAILURE
+      } catch (error) {
         markAsFailed(id);
       }
 
@@ -185,7 +201,15 @@ class TransferNotifier extends StateNotifier<List<FileTransfer>> {
       final subscription = progressStream.listen(
             (progress) => updateProgress(id, progress),
         onDone: () => markAsComplete(id),
-        onError: (error) => markAsFailed(id),
+        onError: (error) {
+          if (error is NetworkFailureException) {
+            markAsFailed(id);
+            print('Notifier: Resumed download stream failed: ${error.message}');
+          } else {
+            markAsFailed(id);
+            print('Notifier: Resumed download stream failed due to unknown error: $error');
+          }
+        },
       );
 
       state = state.map((t) => t.id == id ? t.copyWith(subscription: subscription) : t).toList();

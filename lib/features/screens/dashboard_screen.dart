@@ -35,14 +35,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         backgroundColor: Colors.blueAccent,
       ),
 
-      // 🚨 Body Structure: Column is used to place the banner persistently
-      // above the dynamically changing tab content.
+
       body: Column(
         children: [
-          // 1. 🌐 Global Status Banner (Always visible and shows active transfers)
+
           const GlobalTransferStatus(),
 
-          // 2. 📱 Swappable Content Area (Expanded to take remaining space)
+
           Expanded(
             child: Center(
               // The selected screen widget is displayed here
@@ -52,7 +51,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
 
-      // --- Bottom Navigation Bar ---
+
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
